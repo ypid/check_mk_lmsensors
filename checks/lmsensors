@@ -1,0 +1,110 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+# Example for output from agent
+# ---------------------------------------------------------
+# {
+#    "coretemp-isa-0000":{
+#       "Adapter": "ISA adapter",
+#       "Physical_id_0":{
+#          "temp1_input": 43.000,
+#          "temp1_max": 80.000,
+#          "temp1_crit": 100.000,
+#          "temp1_crit_alarm": 0.000
+#       },
+#       "Core_0":{
+#          "temp2_input": 37.000,
+#          "temp2_max": 80.000,
+#          "temp2_crit": 100.000,
+#          "temp2_crit_alarm": 0.000
+#       },
+#       "Core_1":{
+#          "temp3_input": 43.000,
+#          "temp3_max": 80.000,
+#          "temp3_crit": 100.000,
+#          "temp3_crit_alarm": 0.000
+#       }
+#    }
+# }
+# ---------------------------------------------------------
+
+def get_chips(info):
+	import itertools
+	import json
+
+	json_encoded_chips = u"".join(list(itertools.chain.from_iterable(info)))
+	return json.loads(json_encoded_chips)
+
+
+def inventory_lmsensors(checkname, info):
+	import re
+
+	chips = get_chips(info)
+
+	inventory = []
+	for chip_path, sensors in chips.items():
+		del sensors['Adapter']
+
+		for sensor_name, sensor_data  in sensors.items():
+			sensor_type = re.sub(r'\d.*', u'', sensor_data.keys()[0])
+
+			if checkname == ('lmsensors.' + sensor_type):
+				yield(sensor_name, "", ())
+
+def check_lmsensors(item, params, info):
+	type_to_unit = {
+	    'temp': u'°C',
+	    'fan': u'RPM',
+	    'volt': u'V',
+	}
+
+	chips = get_chips(info)
+
+	sensor_input = None
+	for chip_path, sensors in chips.items():
+		del sensors['Adapter']
+
+		for sensor_name, sensor_data  in sensors.items():
+			if sensor_name != item:
+				continue
+
+			sensor_type = re.sub(r'\d.*', u'', sensor_data.keys()[0])
+
+			min_value = 0
+			max_value = 0
+			critical_value = 0
+			for k,v in sensor_data.items():
+				if k.endswith('_min'):
+					min_value = v
+				elif k.endswith('_max'):
+					max_value = v
+				elif k.endswith('_crit'):
+					critical_value = v
+
+			if max_value == 0 and critical_value != 0:
+				max_value = critical_value
+
+			if max_value == 0:
+				max_value = None
+
+			for k,v in sensor_data.items():
+				if k.endswith('_input'):
+					sensor_input = float(v)
+
+
+	if sensor_input is None:
+		return (3, "UNKNOWN - sensor status not found in agent output")
+
+	perfdata = [ ( item, sensor_input, "", savefloat(max_value) ) ]
+	sensor_unit = type_to_unit[sensor_type]
+	if max_value is not None and sensor_input > float(max_value):
+		return (2, "CRITICAL - %s %s, which is bigger than %s %s" % (sensor_input, sensor_unit, max_value, sensor_unit), perfdata)
+	elif min_value is not None and sensor_input < float(min_value):
+		return (2, "CRITICAL - %s %s, which is smaller than %s %s" % (sensor_input, sensor_unit, min_value, sensor_unit), perfdata)
+	# TODO: warnings
+	else:
+		return (0, "OK - %s %s" % (sensor_input, sensor_unit), perfdata)
+
+check_info['lmsensors.fan'] = (check_lmsensors, "Fan %s", 1, inventory_lmsensors)
+check_info['lmsensors.temp'] = (check_lmsensors, "Temperature %s", 1, inventory_lmsensors)
+check_info['lmsensors.volt'] = (check_lmsensors, "Current %s", 1, inventory_lmsensors)
