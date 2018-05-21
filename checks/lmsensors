@@ -55,6 +55,7 @@ def check_lmsensors(item, params, info):
 	type_to_unit = {
 	    'temp': u'°C',
 	    'fan': u'RPM',
+		# FIXME: `in` is used by lm-sensors.
 	    'volt': u'V',
 	}
 
